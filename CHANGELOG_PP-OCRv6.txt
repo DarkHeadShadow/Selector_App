@@ -1,0 +1,19 @@
+Selector-app PP-OCRv6 – 2026-09-06
+- Tesseract/pytesseract eltávolítva.
+- PP-OCRv6_medium bevezetve.
+- PaddleOCR motor lazy init.
+- Helyi/offline modellek automatikus felismerése.
+- PP-OCR confidence naplózás.
+- Confidence metaadat kizárva a kereshető OCR szövegből.
+- Tesseract installer és registry változó eltávolítva.
+- Offline modell-előkészítő script hozzáadva.
+- PaddleOCR/PaddlePaddle PyInstaller build script hozzáadva.
+- Keresőszókból képzett kimeneti mappanevek biztonságossá téve.
+- XLS keresés xlrd támogatással, valamint OCR-szálban a Tkinter változók olvasása megszüntetve.
+- Üres fájltípus-választás és azonos forrás/kimeneti mappa ellenőrzése.
+- A kimeneti mappa kizárása az almappás keresésből, fájlnévütközések elkerülése.
+- Inno Setup AppId javítva érvényes GUID-ra.
+- Online Inno Setup telepítő hozzáadva: saját Python-környezet, Paddle CPU,
+  OCR-modellek és ellenőrzött Poppler-csomag telepítése.
+- A PyInstaller külön build-függőség lett; a végfelhasználói telepítő nem
+  telepít fejlesztői eszközöket.

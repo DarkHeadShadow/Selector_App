@@ -1,0 +1,19 @@
+Pillow
+PyPDF2
+python-docx
+openpyxl
+xlrd
+odfpy
+chardet
+beautifulsoup4
+pdf2image
+pikepdf
+extract_msg
+lxml
+rarfile
+numpy
+paddleocr>=3.7.0,<4
+ttkbootstrap
+
+# PaddlePaddle CPU is installed separately because the official Windows wheel
+# uses PaddlePaddle's package index. See install_ppocrv6_cpu.ps1.
