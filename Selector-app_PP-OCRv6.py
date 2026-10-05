@@ -17,24 +17,35 @@ from email.parser import BytesParser
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+# Saját tálcaikon Windowson (különben a Python ikonja jelenne meg)
+if os.name == "nt":
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SzabolcsBalint.SelectorApp")
+    except Exception:
+        pass
+
 # Windows alatt a külső OCR/Poppler konzolablakok elrejtése
 if os.name == "nt":
     _original_popen = subprocess.Popen
 
-    def _hidden_popen(*args, **kwargs):
-        try:
-            startupinfo = kwargs.get("startupinfo")
-            if startupinfo is None:
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-                kwargs["startupinfo"] = startupinfo
-            kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NO_WINDOW
-        except Exception:
-            pass
-        return _original_popen(*args, **kwargs)
+    # Osztályként (nem függvényként) cseréljük le, mert több csomag
+    # (pl. a paddlex) a subprocess.Popen-ből örököl.
+    class _HiddenPopen(_original_popen):
+        def __init__(self, *args, **kwargs):
+            try:
+                startupinfo = kwargs.get("startupinfo")
+                if startupinfo is None:
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+                    kwargs["startupinfo"] = startupinfo
+                kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | subprocess.CREATE_NO_WINDOW
+            except Exception:
+                pass
+            super().__init__(*args, **kwargs)
 
-    subprocess.Popen = _hidden_popen
+    subprocess.Popen = _HiddenPopen
 
 
 try:
@@ -1056,6 +1067,12 @@ def create_window():
     else:
         window = tk.Tk()
     window.title(f"{APP_VERSION_LABEL} - Készítő: {CREATOR_NAME}")
+    _icon_path = os.path.join(APP_BASE_DIR, "Selector-app.ico")
+    if os.path.exists(_icon_path):
+        try:
+            window.iconbitmap(default=_icon_path)
+        except Exception:
+            pass
     window.geometry("1050x760")
 
     # Dark mode színek (fallback tkinter widgetekhez is)

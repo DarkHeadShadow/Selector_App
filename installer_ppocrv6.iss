@@ -11,6 +11,8 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+SetupIconFile=Selector-app.ico
+UninstallDisplayIcon={app}\Selector-app.ico
 OutputDir=installer_output
 OutputBaseFilename=Selector-app-Setup-PP-OCRv6
 Compression=lzma2
@@ -25,13 +27,14 @@ Name: "desktopicon"; Description: "Asztali ikon létrehozása"; GroupDescription
 
 [Files]
 Source: "Selector-app.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Selector-app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install_online.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README_PP-OCRv6.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\venv\Scripts\{#MyAppExeName}"; Parameters: """{app}\Selector-app.py"""; WorkingDir: "{app}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\venv\Scripts\{#MyAppExeName}"; Parameters: """{app}\Selector-app.py"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\venv\Scripts\{#MyAppExeName}"; Parameters: """{app}\Selector-app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\Selector-app.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\venv\Scripts\{#MyAppExeName}"; Parameters: """{app}\Selector-app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\Selector-app.ico"; Tasks: desktopicon
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\python"
@@ -60,6 +63,7 @@ begin
       SW_SHOW, ewWaitUntilTerminated, ResultCode) then
       RaiseException('A függőségek telepítője nem indítható el.');
     if ResultCode <> 0 then
-      RaiseException(Format('A függőségek telepítése hibával leállt (kód: %d).', [ResultCode]));
+      RaiseException(Format('A függőségek telepítése hibával leállt (kód: %d).'#13#10#13#10 +
+        'A részletes hibaüzenet itt található:'#13#10'%s', [ResultCode, ExpandConstant('{app}\install_log.txt')]));
   end;
 end;

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$InstallDir
 )
@@ -12,6 +12,10 @@ $pythonRoot = Join-Path $InstallDir "python"
 $venvRoot = Join-Path $InstallDir "venv"
 $python = Join-Path $venvRoot "Scripts\python.exe"
 $tempRoot = Join-Path $env:TEMP ("Selector-app-install-" + [guid]::NewGuid().ToString("N"))
+$logFile = Join-Path $InstallDir "install_log.txt"
+try { Start-Transcript -LiteralPath $logFile -Force | Out-Null } catch { }
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$ProgressPreference = "SilentlyContinue"
 
 function Invoke-CheckedProcess {
     param(
@@ -47,25 +51,51 @@ try {
     }
 
     Write-Host "[2/5] Alkalmazás saját Python futtatókörnyezetének telepítése..."
-    $pythonArgs = @(
-        "/quiet",
-        "InstallAllUsers=0",
-        ('TargetDir="{0}"' -f $pythonRoot),
-        "Include_launcher=0",
-        "Include_pip=1",
-        "Include_tcltk=1",
-        "Include_test=0",
-        "PrependPath=0",
-        "Shortcuts=0",
-        "AssociateFiles=0"
-    )
-    $pythonInstall = Start-Process -FilePath $pythonInstaller -ArgumentList $pythonArgs -Wait -PassThru
-    if ($pythonInstall.ExitCode -notin @(0, 3010)) {
-        throw "A Python telepítése sikertelen (kilépési kód: $($pythonInstall.ExitCode))."
-    }
+    # A Python MSI-csomagjait "adminisztratív" módban bontjuk ki: így a Python nem
+    # regisztrálódik a Windowsban, és egy korábbi (félbemaradt) telepítés sem zavarja.
     $basePython = Join-Path $pythonRoot "python.exe"
+    if (Test-Path -LiteralPath $basePython) {
+        Write-Host "A beépített Python már megtalálható, a telepítés kihagyva."
+    } else {
+        # Az MSI-csomagokat közvetlenül a python.org-ról töltjük le, mert a Python
+        # telepítője kihagyja azokat, amelyeket a gépen már telepítettnek hisz.
+        $layoutDir = Join-Path $tempRoot "python-msi"
+        New-Item -ItemType Directory -Force -Path $layoutDir | Out-Null
+        $msiBaseUrl = "https://www.python.org/ftp/python/$pythonVersion/amd64"
+        foreach ($msiName in @("core.msi", "exe.msi", "lib.msi", "tcltk.msi")) {
+            $msi = Join-Path $layoutDir $msiName
+            Write-Host "  $msiName letöltése..."
+            Invoke-WebRequest -UseBasicParsing -Uri "$msiBaseUrl/$msiName" -OutFile $msi
+            $sig = Get-AuthenticodeSignature -FilePath $msi
+            if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "Python Software Foundation") {
+                throw "A(z) $msiName digitális aláírása nem érvényes."
+            }
+        }
+        New-Item -ItemType Directory -Force -Path $pythonRoot | Out-Null
+        foreach ($msiName in @("core.msi", "exe.msi", "lib.msi", "tcltk.msi")) {
+            $msi = Join-Path $layoutDir $msiName
+            if (-not (Test-Path -LiteralPath $msi)) {
+                throw "Hiányzó Python-összetevő: $msiName"
+            }
+            Write-Host "  $msiName kibontása..."
+            $msiLog = Join-Path $InstallDir ("python_" + $msiName + ".log")
+            $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList @(
+                "/a", ('"{0}"' -f $msi), "/qn", ('TARGETDIR="{0}"' -f $pythonRoot), "/l*v", ('"{0}"' -f $msiLog)
+            ) -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+                throw "A(z) $msiName kibontása sikertelen (kilépési kód: $($proc.ExitCode)). Napló: $msiLog"
+            }
+            Remove-Item -LiteralPath $msiLog -Force -ErrorAction SilentlyContinue
+        }
+        Get-ChildItem -LiteralPath $pythonRoot -Filter "*.msi" -File | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
     if (-not (Test-Path -LiteralPath $basePython)) {
-        throw "A Python telepítése lefutott, de a futtatókörnyezet nem található."
+        $found = Get-ChildItem -LiteralPath $pythonRoot -Filter "python.exe" -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { $basePython = $found.FullName }
+    }
+    if (-not (Test-Path -LiteralPath $basePython)) {
+        throw "A Python kibontása lefutott, de a futtatókörnyezet nem található ($basePython)."
     }
 
     if (Test-Path -LiteralPath $venvRoot) {
@@ -75,10 +105,13 @@ try {
 
     Write-Host "[3/5] PaddlePaddle CPU és alkalmazásfüggőségek telepítése..."
     Invoke-CheckedProcess -FilePath $python -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -FailureMessage "A pip frissítése sikertelen."
-    Invoke-CheckedProcess -FilePath $python -ArgumentList @(
-        "-m", "pip", "install", "paddlepaddle==3.2.0",
-        "--index-url", "https://www.paddlepaddle.org.cn/packages/stable/cpu/"
-    ) -FailureMessage "A PaddlePaddle CPU telepítése sikertelen."
+    & $python -m pip install "paddlepaddle==3.2.0" --index-url "https://www.paddlepaddle.org.cn/packages/stable/cpu/"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "A PaddlePaddle saját tárolója nem elérhető, próbálkozás a PyPI-ról..."
+        Invoke-CheckedProcess -FilePath $python -ArgumentList @(
+            "-m", "pip", "install", "paddlepaddle==3.2.0"
+        ) -FailureMessage "A PaddlePaddle CPU telepítése sikertelen."
+    }
     Invoke-CheckedProcess -FilePath $python -ArgumentList @(
         "-m", "pip", "install", "-r", (Join-Path $InstallDir "requirements.txt")
     ) -FailureMessage "A Selector-app függőségeinek telepítése sikertelen."
@@ -95,7 +128,9 @@ PaddleOCR(
     engine="paddle",
 )
 '@
-    Invoke-CheckedProcess -FilePath $python -ArgumentList @("-c", $modelSetup) -FailureMessage "A PP-OCRv6 modellek letöltése sikertelen."
+    $modelSetupFile = Join-Path $tempRoot "model_setup.py"
+    Set-Content -LiteralPath $modelSetupFile -Value $modelSetup -Encoding UTF8
+    Invoke-CheckedProcess -FilePath $python -ArgumentList @($modelSetupFile) -FailureMessage "A PP-OCRv6 modellek letöltése sikertelen."
 
     $cacheRoot = Join-Path $env:USERPROFILE ".paddlex\official_models"
     $modelsRoot = Join-Path $InstallDir "models"
@@ -140,11 +175,16 @@ PaddleOCR(
     Copy-Item -Path (Join-Path $popplerRoot "*") -Destination $destinationPoppler -Recurse -Force
 
     Write-Host "A Selector-app és minden futásához szükséges összetevő telepítése befejeződött."
+    $exitCode = 0
 } catch {
-    Write-Error $_
-    exit 1
+    Write-Host ""
+    Write-Host "HIBA: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Részletek: $logFile"
+    $exitCode = 1
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
+    try { Stop-Transcript | Out-Null } catch { }
 }
+exit $exitCode

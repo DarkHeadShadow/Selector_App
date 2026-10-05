@@ -1,6 +1,13 @@
 
 import os
 import sys
+
+# pythonw.exe alatt (parancsikonról indítva) nincs konzol: sys.stdout/stderr None,
+# és a paddleocr/paddlex importja ettől elhasal. Ilyenkor üres kimenetre irányítjuk.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 import re
 import shutil
 import threading
@@ -17,24 +24,35 @@ from email.parser import BytesParser
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+# Saját tálcaikon Windowson (különben a Python ikonja jelenne meg)
+if os.name == "nt":
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SzabolcsBalint.SelectorApp")
+    except Exception:
+        pass
+
 # Windows alatt a külső OCR/Poppler konzolablakok elrejtése
 if os.name == "nt":
     _original_popen = subprocess.Popen
 
-    def _hidden_popen(*args, **kwargs):
-        try:
-            startupinfo = kwargs.get("startupinfo")
-            if startupinfo is None:
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-                kwargs["startupinfo"] = startupinfo
-            kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NO_WINDOW
-        except Exception:
-            pass
-        return _original_popen(*args, **kwargs)
+    # Osztályként (nem függvényként) cseréljük le, mert több csomag
+    # (pl. a paddlex) a subprocess.Popen-ből örököl.
+    class _HiddenPopen(_original_popen):
+        def __init__(self, *args, **kwargs):
+            try:
+                startupinfo = kwargs.get("startupinfo")
+                if startupinfo is None:
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+                    kwargs["startupinfo"] = startupinfo
+                kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | subprocess.CREATE_NO_WINDOW
+            except Exception:
+                pass
+            super().__init__(*args, **kwargs)
 
-    subprocess.Popen = _hidden_popen
+    subprocess.Popen = _HiddenPopen
 
 
 try:
@@ -161,10 +179,12 @@ try:
 except Exception:
     np = None
 
+_OCR_IMPORT_ERROR = None
 try:
     from paddleocr import PaddleOCR
-except Exception:
+except Exception as _exc:
     PaddleOCR = None
+    _OCR_IMPORT_ERROR = f"{type(_exc).__name__}: {_exc}"
 
 try:
     from pdf2image import convert_from_path
@@ -291,6 +311,8 @@ def log_error(message):
 log_message(f"Runtime mappa: {APP_DATA_DIR}")
 log_message(f"Log fájl: {LOG_FILE}")
 log_message(f"OCR debug mappa: {OCR_DEBUG_DIR}")
+if _OCR_IMPORT_ERROR:
+    log_error(f"A paddleocr importja sikertelen: {_OCR_IMPORT_ERROR}")
 log_message(f"OCR állapot: HAS_OCR={HAS_OCR}, ENGINE={OCR_ENGINE_NAME}, DET_LOCAL={bool(_local_model_dir(PADDLE_DET_MODEL_DIR))}, REC_LOCAL={bool(_local_model_dir(PADDLE_REC_MODEL_DIR))}, POPPLER_PATH={POPPLER_PATH or '(nincs)'}")
 
 
@@ -1056,6 +1078,12 @@ def create_window():
     else:
         window = tk.Tk()
     window.title(f"{APP_VERSION_LABEL} - Készítő: {CREATOR_NAME}")
+    _icon_path = os.path.join(APP_BASE_DIR, "Selector-app.ico")
+    if os.path.exists(_icon_path):
+        try:
+            window.iconbitmap(default=_icon_path)
+        except Exception:
+            pass
     window.geometry("1050x760")
 
     # Dark mode színek (fallback tkinter widgetekhez is)
